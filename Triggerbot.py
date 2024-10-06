@@ -1,12 +1,12 @@
 import json, time, threading, keyboard, sys
-import win32api
+import win32api, win32con
 from ctypes import WinDLL
 import numpy as np
 from mss import mss
 import socket
 
 # Socket setup
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)     
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect(('localhost', 65432))
 
 def safe_exit():
@@ -20,9 +20,8 @@ user32, kernel32, shcore = (WinDLL("user32", use_last_error=True), WinDLL("kerne
 shcore.SetProcessDpiAwareness(2)
 WIDTH, HEIGHT = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
-# Screen grab area
-ZONE = 5
-GRAB_AREA = (WIDTH // 2 - ZONE, HEIGHT // 2 - ZONE, WIDTH // 2 + ZONE, HEIGHT // 2 + ZONE)
+# Change it so it can grab all the screen
+GRAB_AREA = (0, 0, WIDTH, HEIGHT)
 
 class TriggerBot:
     def __init__(self):
@@ -32,8 +31,7 @@ class TriggerBot:
         self.exit = False
         self.lock = threading.Lock()
         self.spoofed_key = 'k'
-        
-        # Load config
+
         try:
             with open('config.json') as f:
                 cfg = json.load(f)
@@ -54,7 +52,7 @@ class TriggerBot:
             kernel32.Beep(440, 75)
             kernel32.Beep(beep1, 100)
 
-    def scan_pixels(self):
+    def scan_and_aim(self):
         img = np.array(self.sct.grab(GRAB_AREA))
         pixels = img.reshape(-1, 4)
         mask = (
@@ -62,9 +60,26 @@ class TriggerBot:
             (self.G - self.color_tol < pixels[:, 1]) & (pixels[:, 1] < self.G + self.color_tol) &
             (self.B - self.color_tol < pixels[:, 2]) & (pixels[:, 2] < self.B + self.color_tol)
         )
-        if self.active and mask.sum() > 0:
-            time.sleep(self.base_delay * (1 + self.delay_pct))
-            sock.send(self.spoofed_key.encode())
+
+        matching_pixels = np.argwhere(mask.reshape(img.shape[:2]))
+        if matching_pixels.size > 0:
+            target_pos = np.mean(matching_pixels, axis=0).astype(int)
+            self.aim_at(target_pos[1], target_pos[0])
+
+            if self.active:
+                time.sleep(self.base_delay * (1 + self.delay_pct))
+                sock.send(self.spoofed_key.encode())
+
+    def aim_at(self, target_x, target_y):
+        screen_center_x = WIDTH // 2
+        screen_center_y = HEIGHT // 2
+
+        # Calculate the difference between the target position and the screen center
+        delta_x = target_x - screen_center_x
+        delta_y = target_y - screen_center_y
+
+        # added smooth aim as a real player
+        win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, delta_x, delta_y, 0, 0)
 
     def toggle(self):
         if keyboard.is_pressed("f10"):
@@ -82,7 +97,7 @@ class TriggerBot:
         while not self.exit:
             if win32api.GetAsyncKeyState(self.hotkey) < 0:
                 self.active = True
-                self.scan_pixels()
+                self.scan_and_aim()
             else:
                 time.sleep(0.1)
             if keyboard.is_pressed("ctrl+shift+x"):
@@ -93,7 +108,7 @@ class TriggerBot:
         while not self.exit:
             if self.auto_enable:
                 self.toggle()
-                self.scan_pixels() if self.active else time.sleep(0.1)
+                self.scan_and_aim() if self.active else time.sleep(0.1)
             else:
                 self.hold_mode()
 

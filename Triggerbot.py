@@ -20,8 +20,16 @@ user32, kernel32, shcore = (WinDLL("user32", use_last_error=True), WinDLL("kerne
 shcore.SetProcessDpiAwareness(2)
 WIDTH, HEIGHT = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
-# Change it so it can grab all the screen
-GRAB_AREA = (0, 0, WIDTH, HEIGHT)
+# Reduce scan area (centered on the screen)
+SCAN_WIDTH = 400  
+SCAN_HEIGHT = 300 
+
+GRAB_AREA = (
+    WIDTH // 2 - SCAN_WIDTH // 2,   # Left
+    HEIGHT // 2 - SCAN_HEIGHT // 2, # Top
+    WIDTH // 2 + SCAN_WIDTH // 2,   # Right
+    HEIGHT // 2 + SCAN_HEIGHT // 2  # Bottom
+)
 
 class TriggerBot:
     def __init__(self):
@@ -32,6 +40,7 @@ class TriggerBot:
         self.lock = threading.Lock()
         self.spoofed_key = 'k'
 
+        # Load config
         try:
             with open('config.json') as f:
                 cfg = json.load(f)
@@ -78,7 +87,7 @@ class TriggerBot:
         delta_x = target_x - screen_center_x
         delta_y = target_y - screen_center_y
 
-        # added smooth aim as a real player
+        # Move mouse by delta (simulates smooth aim)
         win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, delta_x, delta_y, 0, 0)
 
     def toggle(self):

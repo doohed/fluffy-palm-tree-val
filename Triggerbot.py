@@ -1,5 +1,5 @@
 import json, time, threading, keyboard, sys
-import win32api, win32con
+import pydirectinput  # DirectInput-compatible mouse control
 from ctypes import WinDLL
 import numpy as np
 from mss import mss
@@ -20,16 +20,20 @@ user32, kernel32, shcore = (WinDLL("user32", use_last_error=True), WinDLL("kerne
 shcore.SetProcessDpiAwareness(2)
 WIDTH, HEIGHT = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
-# Reduce scan area (centered on the screen)
-SCAN_WIDTH = 400  
-SCAN_HEIGHT = 300 
-
-GRAB_AREA = (
-    WIDTH // 2 - SCAN_WIDTH // 2,   # Left
-    HEIGHT // 2 - SCAN_HEIGHT // 2, # Top
-    WIDTH // 2 + SCAN_WIDTH // 2,   # Right
-    HEIGHT // 2 + SCAN_HEIGHT // 2  # Bottom
+# Define a small zone around the center of the screen to scan
+ZONE = 5
+GRAB_ZONE = (
+    int(WIDTH / 2 - ZONE),
+    int(HEIGHT / 2 - ZONE),
+    int(WIDTH / 2 + ZONE),
+    int(HEIGHT / 2 + ZONE),
 )
+
+# Map hex codes to human-readable key names
+HEX_TO_KEY = {
+    "0xA0": "shift",
+    # Add more mappings if needed
+}
 
 class TriggerBot:
     def __init__(self):
@@ -44,7 +48,8 @@ class TriggerBot:
         try:
             with open('config.json') as f:
                 cfg = json.load(f)
-            self.hotkey = int(cfg["trigger_hotkey"], 16)
+            hex_hotkey = cfg["trigger_hotkey"]
+            self.hotkey = HEX_TO_KEY.get(hex_hotkey, hex_hotkey)  # Convert hex to key name
             self.auto_enable = cfg["always_enabled"]
             self.delay_pct = cfg["trigger_delay"] / 100.0
             self.base_delay = cfg["base_delay"]
@@ -62,7 +67,8 @@ class TriggerBot:
             kernel32.Beep(beep1, 100)
 
     def scan_and_aim(self):
-        img = np.array(self.sct.grab(GRAB_AREA))
+        # Scan the small zone in the center of the screen
+        img = np.array(self.sct.grab(GRAB_ZONE))
         pixels = img.reshape(-1, 4)
         mask = (
             (self.R - self.color_tol < pixels[:, 0]) & (pixels[:, 0] < self.R + self.color_tol) &
@@ -87,8 +93,8 @@ class TriggerBot:
         delta_x = target_x - screen_center_x
         delta_y = target_y - screen_center_y
 
-        # Move mouse by delta (simulates smooth aim)
-        win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, delta_x, delta_y, 0, 0)
+        # Use pydirectinput to move the mouse
+        pydirectinput.move(delta_x, delta_y)
 
     def toggle(self):
         if keyboard.is_pressed("f10"):
@@ -104,7 +110,7 @@ class TriggerBot:
 
     def hold_mode(self):
         while not self.exit:
-            if win32api.GetAsyncKeyState(self.hotkey) < 0:
+            if keyboard.is_pressed(self.hotkey):  # Uses mapped hotkey now
                 self.active = True
                 self.scan_and_aim()
             else:
